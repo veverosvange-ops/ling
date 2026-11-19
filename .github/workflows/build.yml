@@ -1,0 +1,56 @@
+name: Build LingAutoSword
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Theos
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: ~/theos
+          key: theos-${{ runner.os }}-v2
+
+      - name: Install Theos
+        if: steps.cache-theos.outputs.cache-hit != 'true'
+        run: git clone --recursive https://github.com/theos/theos.git $HOME/theos
+
+      - name: Install ldid
+        run: brew install ldid
+
+      - name: Link iOS SDK
+        run: |
+          SDK=$(xcrun --show-sdk-path --sdk iphoneos)
+          VER=$(xcrun --show-sdk-version --sdk iphoneos)
+          mkdir -p "$HOME/theos/sdks"
+          ln -sfn "$SDK" "$HOME/theos/sdks/iPhoneOS${VER}.sdk"
+          echo "SDK_VER=$VER" >> $GITHUB_ENV
+
+      - name: Build
+        run: |
+          export THEOS="$HOME/theos"
+          make -j$(sysctl -n hw.logicalcpu) \
+            ARCHS="arm64 arm64e" \
+            TARGET="iphone:clang:${SDK_VER}:14.0"
+
+      - name: Collect
+        run: |
+          mkdir -p artifact
+          find .theos/obj -name "*.dylib" -exec cp {} artifact/ \;
+          ls -lh artifact/
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: LingAutoSword-dylib
+          path: artifact/
+          retention-days: 30
