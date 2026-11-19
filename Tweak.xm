@@ -257,6 +257,8 @@ static void tick(void) {
 // Overlay UI
 // ─────────────────────────────────────────────────────────
 
+static LingMenu *g_menu = nil;
+
 @interface LingMenu : UIView
 @property CGPoint drag;
 - (void)refresh;
@@ -322,7 +324,12 @@ static void tick(void) {
 @implementation LingWindow
 - (UIView *)hitTest:(CGPoint)p withEvent:(UIEvent *)e {
     UIView *v = [super hitTest:p withEvent:e];
-    return v == self ? nil : v;
+
+    // Full-screen transparent window: only the floating menu consumes touches.
+    // All touches outside the menu pass through to the game underneath.
+    if (!g_menu || !v) return nil;
+    if (v == g_menu || [v isDescendantOfView:g_menu]) return v;
+    return nil;
 }
 @end
 
@@ -330,7 +337,6 @@ static void tick(void) {
 // Timer (must be after LingMenu @implementation)
 // ─────────────────────────────────────────────────────────
 
-static LingMenu *g_menu = nil;
 // Keep the overlay window and dispatch sources alive for the lifetime of the tweak.
 static UIWindow *g_overlayWindow = nil;
 static dispatch_source_t g_tickTimer = nil;
