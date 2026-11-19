@@ -331,8 +331,13 @@ static void tick(void) {
 // ─────────────────────────────────────────────────────────
 
 static LingMenu *g_menu = nil;
+// Keep the overlay window and dispatch sources alive for the lifetime of the tweak.
+static UIWindow *g_overlayWindow = nil;
+static dispatch_source_t g_tickTimer = nil;
+static dispatch_source_t g_overlayRetry = nil;
 
 static void start_timer(void) {
+    if (g_tickTimer) return;
     dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                                   dispatch_get_main_queue());
     dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 0),
@@ -343,48 +348,84 @@ static void start_timer(void) {
         if (++c % 20 == 0 && g_menu)
             [g_menu refresh];
     });
+    g_tickTimer = t;
     dispatch_resume(t);
 }
 
 static void setup_overlay(void) {
-    if (g_menu) return; // already set up
+    if (g_menu && g_overlayWindow) return;
 
-    // Try UIWindowScene first (iOS 13+)
+    UIApplication *app = UIApplication.sharedApplication;
     UIWindowScene *scene = nil;
-    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
-        if ([s isKindOfClass:[UIWindowScene class]]) {
-            scene = (UIWindowScene *)s;
-            break; // take first available, don't require ForegroundActive
+
+    // Only attach to a foreground scene; selecting a background scene can
+    // create a window that exists but is never presented.
+    for (UIScene *candidate in app.connectedScenes) {
+        if (![candidate isKindOfClass:[UIWindowScene class]]) continue;
+        if (candidate.activationState == UISceneActivationStateForegroundActive) {
+            scene = (UIWindowScene *)candidate;
+            break;
+        }
+        if (!scene && candidate.activationState == UISceneActivationStateForegroundInactive) {
+            scene = (UIWindowScene *)candidate;
         }
     }
 
     if (scene) {
         LingWindow *win = [[LingWindow alloc] initWithWindowScene:scene];
-        win.windowLevel = UIWindowLevelAlert + 100;
+        win.frame = scene.coordinateSpace.bounds;
+        win.windowLevel = UIWindowLevelAlert + 1;
         win.backgroundColor = UIColor.clearColor;
-        win.hidden = NO;
+        win.opaque = NO;
+        win.rootViewController = [UIViewController new];
+        win.rootViewController.view.backgroundColor = UIColor.clearColor;
+        win.rootViewController.view.userInteractionEnabled = YES;
 
-        CGFloat top  = win.safeAreaInsets.top  > 0 ? win.safeAreaInsets.top  : 44;
+        // Retain the UIWindow explicitly. A local UIWindow can disappear after
+        // setup returns, taking the overlay with it.
+        g_overlayWindow = win;
+        CGFloat top = win.safeAreaInsets.top > 0 ? win.safeAreaInsets.top : 44;
         CGFloat left = win.safeAreaInsets.left > 0 ? win.safeAreaInsets.left : 12;
-
         LingMenu *menu = [LingMenu new];
         menu.center = CGPointMake(left + 32, top + 48);
-        [win addSubview:menu];
+        [win.rootViewController.view addSubview:menu];
         g_menu = menu;
-    } else {
-        // Fallback: attach to existing key window (suppress deprecation — no scene available)
+        win.hidden = NO;
+        [win setNeedsLayout];
+        [win layoutIfNeeded];
+        NSLog(@"[Ling] overlay attached to foreground UIWindowScene");
+        return;
+    }
+
+    // Scene may not be ready immediately after injection. Attach to the
+    // current app window when available, and let the retry timer try again.
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-        UIWindow *kw = UIApplication.sharedApplication.keyWindow;
+    UIWindow *keyWindow = app.keyWindow;
 #pragma clang diagnostic pop
-        if (!kw) return;
-        CGFloat top  = kw.safeAreaInsets.top  > 0 ? kw.safeAreaInsets.top  : 44;
-        CGFloat left = kw.safeAreaInsets.left > 0 ? kw.safeAreaInsets.left : 12;
-        LingMenu *menu = [LingMenu new];
-        menu.center = CGPointMake(left + 32, top + 48);
-        [kw addSubview:menu];
-        g_menu = menu;
+    if (!keyWindow) {
+        for (UIScene *candidate in app.connectedScenes) {
+            if (![candidate isKindOfClass:[UIWindowScene class]]) continue;
+            for (UIWindow *candidateWindow in ((UIWindowScene *)candidate).windows) {
+                if (!candidateWindow.hidden) { keyWindow = candidateWindow; break; }
+            }
+            if (keyWindow) break;
+        }
     }
+    if (!keyWindow) {
+        NSLog(@"[Ling] overlay waiting: no active app window yet");
+        return;
+    }
+
+    CGFloat top = keyWindow.safeAreaInsets.top > 0 ? keyWindow.safeAreaInsets.top : 44;
+    CGFloat left = keyWindow.safeAreaInsets.left > 0 ? keyWindow.safeAreaInsets.left : 12;
+    LingMenu *menu = [LingMenu new];
+    menu.center = CGPointMake(left + 32, top + 48);
+    [keyWindow addSubview:menu];
+    [keyWindow bringSubviewToFront:menu];
+    g_overlayWindow = keyWindow;
+    g_menu = menu;
+    NSLog(@"[Ling] overlay attached to existing app window");
 }
 
 // ─────────────────────────────────────────────────────────
@@ -402,19 +443,19 @@ static void ling_init(void) {
         start_timer();
     });
 
-    // Retry overlay every 2s until it appears (max 15 tries = 30s)
-    __block int tries = 0;
-    dispatch_source_t retry = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                      dispatch_get_main_queue());
-    dispatch_source_set_timer(retry,
-        dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC),
+    // Retry until UIKit has a foreground window. Keep the source alive.
+    g_overlayRetry = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                             dispatch_get_main_queue());
+    dispatch_source_set_timer(g_overlayRetry,
+        dispatch_time(DISPATCH_TIME_NOW, 1*NSEC_PER_SEC),
         2*NSEC_PER_SEC, NSEC_PER_SEC);
-    dispatch_source_set_event_handler(retry, ^{
-        if (g_menu || ++tries > 15) {
-            dispatch_source_cancel(retry);
+    dispatch_source_set_event_handler(g_overlayRetry, ^{
+        if (g_menu) {
+            dispatch_source_cancel(g_overlayRetry);
+            g_overlayRetry = nil;
             return;
         }
         setup_overlay();
     });
-    dispatch_resume(retry);
+    dispatch_resume(g_overlayRetry);
 }
