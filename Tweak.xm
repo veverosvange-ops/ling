@@ -271,16 +271,30 @@ static LingFloatingButton *g_goMenu = nil;
 @implementation LingFloatingButton
 
 - (instancetype)initWithGoButton:(BOOL)isGo {
-    self = [super initWithFrame:CGRectMake(0, 0, 56, 44)];
+    self = [super initWithFrame:CGRectMake(0, 0, 72, 44)];
     if (!self) return nil;
     _goButton = isGo;
-    self.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
+    self.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.92];
     self.layer.cornerRadius = 11;
     self.layer.borderWidth = 1;
     self.clipsToBounds = YES;
 
+    // Keep the action button separate from the drag handle. A pan recognizer
+    // over the whole button can steal taps and make the floating control jump.
+    UIView *handle = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 12, 44)];
+    handle.backgroundColor = [UIColor colorWithWhite:0.22 alpha:0.95];
+    handle.userInteractionEnabled = YES;
+    UILabel *grip = [[UILabel alloc] initWithFrame:handle.bounds];
+    grip.text = @"⋮";
+    grip.textAlignment = NSTextAlignmentCenter;
+    grip.font = [UIFont boldSystemFontOfSize:17];
+    grip.textColor = [UIColor colorWithWhite:0.82 alpha:1];
+    grip.userInteractionEnabled = NO;
+    [handle addSubview:grip];
+    [self addSubview:handle];
+
     UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
-    button.frame = self.bounds;
+    button.frame = CGRectMake(12, 0, 60, 44);
     button.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     button.titleLabel.font = [UIFont boldSystemFontOfSize:isGo ? 13 : 16];
     [button setTitle:(isGo ? @"GO" : @"L") forState:UIControlStateNormal];
@@ -289,10 +303,10 @@ static LingFloatingButton *g_goMenu = nil;
     [self addSubview:button];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
-    pan.cancelsTouchesInView = NO;
+    pan.cancelsTouchesInView = YES;
     pan.delaysTouchesBegan = NO;
     pan.maximumNumberOfTouches = 1;
-    [self addGestureRecognizer:pan];
+    [handle addGestureRecognizer:pan];
     [self refresh];
     return self;
 }
@@ -323,9 +337,7 @@ static LingFloatingButton *g_goMenu = nil;
     if (!parent) return;
     if (g.state == UIGestureRecognizerStateBegan) {
         _drag = self.center;
-        return;
-    }
-    if (g.state == UIGestureRecognizerStateChanged) {
+    } else if (g.state == UIGestureRecognizerStateChanged) {
         CGPoint translation = [g translationInView:parent];
         CGFloat halfW = CGRectGetWidth(self.bounds) * 0.5;
         CGFloat halfH = CGRectGetHeight(self.bounds) * 0.5;
@@ -338,6 +350,7 @@ static LingFloatingButton *g_goMenu = nil;
                g.state == UIGestureRecognizerStateCancelled ||
                g.state == UIGestureRecognizerStateFailed) {
         _drag = self.center;
+        [g setTranslation:CGPointZero inView:parent];
     }
 }
 @end
