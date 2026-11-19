@@ -325,8 +325,16 @@ static LingFloatingButton *g_goMenu = nil;
     UIColor *titleColor = _goButton
         ? [UIColor yellowColor]
         : (g_enabled ? [UIColor colorWithRed:.2 green:1 blue:.2 alpha:1] : [UIColor grayColor]);
-    UIButton *button = (UIButton *)self.subviews.firstObject;
-    [button setTitleColor:titleColor forState:UIControlStateNormal];
+    UIButton *button = nil;
+    for (UIView *subview in self.subviews) {
+        if ([subview isKindOfClass:[UIButton class]]) {
+            button = (UIButton *)subview;
+            break;
+        }
+    }
+    if (button) {
+        [button setTitleColor:titleColor forState:UIControlStateNormal];
+    }
     self.layer.borderColor = (!_goButton && g_enabled)
         ? [UIColor colorWithRed:.2 green:.9 blue:.2 alpha:.8].CGColor
         : [UIColor colorWithWhite:.4 alpha:.65].CGColor;
