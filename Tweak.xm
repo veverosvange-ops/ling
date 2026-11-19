@@ -295,6 +295,9 @@ static LingMenu *g_menu = nil;
     [self addSubview:go];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
+    pan.cancelsTouchesInView = NO;
+    pan.delaysTouchesBegan = NO;
+    pan.maximumNumberOfTouches = 1;
     [self addGestureRecognizer:pan];
 }
 
@@ -314,9 +317,39 @@ static LingMenu *g_menu = nil;
 }
 
 - (void)pan:(UIPanGestureRecognizer *)g {
-    if (g.state == UIGestureRecognizerStateBegan) _drag = self.center;
-    CGPoint t = [g translationInView:self.superview];
-    self.center = CGPointMake(_drag.x + t.x, _drag.y + t.y);
+    UIView *parent = self.superview;
+    if (!parent) return;
+
+    if (g.state == UIGestureRecognizerStateBegan) {
+        _drag = self.center;
+        return;
+    }
+
+    if (g.state == UIGestureRecognizerStateChanged) {
+        // Both center and translation are expressed in the parent view's
+        // coordinate space. Clamp the menu so it cannot jump off-screen.
+        CGPoint translation = [g translationInView:parent];
+        CGFloat halfW = CGRectGetWidth(self.bounds) * 0.5;
+        CGFloat halfH = CGRectGetHeight(self.bounds) * 0.5;
+        CGFloat minX = halfW;
+        CGFloat maxX = CGRectGetWidth(parent.bounds) - halfW;
+        CGFloat minY = halfH;
+        CGFloat maxY = CGRectGetHeight(parent.bounds) - halfH;
+
+        CGFloat x = _drag.x + translation.x;
+        CGFloat y = _drag.y + translation.y;
+        if (maxX < minX) x = CGRectGetMidX(parent.bounds);
+        else x = MIN(MAX(x, minX), maxX);
+        if (maxY < minY) y = CGRectGetMidY(parent.bounds);
+        else y = MIN(MAX(y, minY), maxY);
+
+        self.center = CGPointMake(x, y);
+    } else if (g.state == UIGestureRecognizerStateEnded ||
+               g.state == UIGestureRecognizerStateCancelled ||
+               g.state == UIGestureRecognizerStateFailed) {
+        _drag = self.center;
+        [g setTranslation:CGPointZero inView:parent];
+    }
 }
 
 @end
