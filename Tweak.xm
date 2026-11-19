@@ -347,14 +347,18 @@ static void start_timer(void) {
 }
 
 static void setup_overlay(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindowScene *scene = nil;
-        for (UIScene *s in UIApplication.sharedApplication.connectedScenes)
-            if ([s isKindOfClass:[UIWindowScene class]] &&
-                s.activationState == UISceneActivationStateForegroundActive)
-                { scene = (UIWindowScene *)s; break; }
-        if (!scene) return;
+    if (g_menu) return; // already set up
 
+    // Try UIWindowScene first (iOS 13+)
+    UIWindowScene *scene = nil;
+    for (UIScene *s in UIApplication.sharedApplication.connectedScenes) {
+        if ([s isKindOfClass:[UIWindowScene class]]) {
+            scene = (UIWindowScene *)s;
+            break; // take first available, don't require ForegroundActive
+        }
+    }
+
+    if (scene) {
         LingWindow *win = [[LingWindow alloc] initWithWindowScene:scene];
         win.windowLevel = UIWindowLevelAlert + 100;
         win.backgroundColor = UIColor.clearColor;
@@ -367,7 +371,17 @@ static void setup_overlay(void) {
         menu.center = CGPointMake(left + 32, top + 48);
         [win addSubview:menu];
         g_menu = menu;
-    });
+    } else {
+        // Fallback: attach to existing keyWindow
+        UIWindow *kw = UIApplication.sharedApplication.keyWindow;
+        if (!kw) return;
+        CGFloat top  = kw.safeAreaInsets.top  > 0 ? kw.safeAreaInsets.top  : 44;
+        CGFloat left = kw.safeAreaInsets.left > 0 ? kw.safeAreaInsets.left : 12;
+        LingMenu *menu = [LingMenu new];
+        menu.center = CGPointMake(left + 32, top + 48);
+        [kw addSubview:menu];
+        g_menu = menu;
+    }
 }
 
 // ─────────────────────────────────────────────────────────
@@ -377,10 +391,27 @@ static void setup_overlay(void) {
 __attribute__((constructor))
 static void ling_init(void) {
     NSLog(@"[LingAutoSword] loaded");
+
+    // Start game tick after 3s
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3*NSEC_PER_SEC),
                    dispatch_get_main_queue(), ^{
-        setup_overlay();
         il2cpp_attach();
         start_timer();
     });
+
+    // Retry overlay every 2s until it appears (max 15 tries = 30s)
+    __block int tries = 0;
+    dispatch_source_t retry = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                      dispatch_get_main_queue());
+    dispatch_source_set_timer(retry,
+        dispatch_time(DISPATCH_TIME_NOW, 2*NSEC_PER_SEC),
+        2*NSEC_PER_SEC, NSEC_PER_SEC);
+    dispatch_source_set_event_handler(retry, ^{
+        if (g_menu || ++tries > 15) {
+            dispatch_source_cancel(retry);
+            return;
+        }
+        setup_overlay();
+    });
+    dispatch_resume(retry);
 }
