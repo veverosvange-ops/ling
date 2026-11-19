@@ -253,29 +253,13 @@ static void tick(void) {
 // Timer
 // ─────────────────────────────────────────────────────────
 
-@class LingMenu;
-static LingMenu *g_menu = nil;
-
-static void start_timer(void) {
-    dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
-                                                  dispatch_get_main_queue());
-    dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 0),
-                              50*NSEC_PER_MSEC, 10*NSEC_PER_MSEC);
-    __block int c = 0;
-    dispatch_source_set_event_handler(t, ^{
-        @try { tick(); } @catch(...) {}
-        if (++c % 20 == 0 && g_menu)
-            [g_menu refresh];
-    });
-    dispatch_resume(t);
-}
-
 // ─────────────────────────────────────────────────────────
 // Overlay UI
 // ─────────────────────────────────────────────────────────
 
 @interface LingMenu : UIView
 @property CGPoint drag;
+- (void)refresh;
 @end
 
 @implementation LingMenu
@@ -341,6 +325,26 @@ static void start_timer(void) {
     return v == self ? nil : v;
 }
 @end
+
+// ─────────────────────────────────────────────────────────
+// Timer (must be after LingMenu @implementation)
+// ─────────────────────────────────────────────────────────
+
+static LingMenu *g_menu = nil;
+
+static void start_timer(void) {
+    dispatch_source_t t = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
+                                                  dispatch_get_main_queue());
+    dispatch_source_set_timer(t, dispatch_time(DISPATCH_TIME_NOW, 0),
+                              50*NSEC_PER_MSEC, 10*NSEC_PER_MSEC);
+    __block int c = 0;
+    dispatch_source_set_event_handler(t, ^{
+        @try { tick(); } @catch(...) {}
+        if (++c % 20 == 0 && g_menu)
+            [g_menu refresh];
+    });
+    dispatch_resume(t);
+}
 
 static void setup_overlay(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
