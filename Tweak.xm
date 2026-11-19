@@ -257,6 +257,7 @@ static void tick(void) {
 // Overlay UI
 // ─────────────────────────────────────────────────────────
 
+@class LingMenu;
 static LingMenu *g_menu = nil;
 
 @interface LingMenu : UIView
