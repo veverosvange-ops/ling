@@ -265,7 +265,7 @@ static void start_timer(void) {
     dispatch_source_set_event_handler(t, ^{
         @try { tick(); } @catch(...) {}
         if (++c % 20 == 0 && g_menu)
-            [(id)g_menu performSelector:NSSelectorFromString(@"refresh")];
+            [g_menu refresh];
     });
     dispatch_resume(t);
 }
