@@ -403,89 +403,74 @@ static void start_timer(void) {
 }
 
 static void setup_overlay(void) {
-    if (g_menu && g_overlayWindow) return;
+    if (g_menu && g_overlayWindow && g_menu.superview == g_overlayWindow) return;
 
     UIApplication *app = UIApplication.sharedApplication;
-    UIWindowScene *scene = nil;
+    UIWindow *hostWindow = nil;
 
-    // Only attach to a foreground scene; selecting a background scene can
-    // create a window that exists but is never presented.
+    // Attach directly to the game's existing window. A second UIWindow can
+    // receive a different orientation transform from Unity's game window,
+    // which makes the floating controls rotate or appear upside down.
     for (UIScene *candidate in app.connectedScenes) {
         if (![candidate isKindOfClass:[UIWindowScene class]]) continue;
-        if (candidate.activationState == UISceneActivationStateForegroundActive) {
-            scene = (UIWindowScene *)candidate;
-            break;
+        if (candidate.activationState != UISceneActivationStateForegroundActive &&
+            candidate.activationState != UISceneActivationStateForegroundInactive) continue;
+
+        UIWindowScene *windowScene = (UIWindowScene *)candidate;
+        for (UIWindow *candidateWindow in windowScene.windows) {
+            if (candidateWindow.hidden) continue;
+            if (candidateWindow.isKeyWindow) {
+                hostWindow = candidateWindow;
+                break;
+            }
+            if (!hostWindow && candidateWindow.windowLevel == UIWindowLevelNormal) {
+                hostWindow = candidateWindow;
+            }
         }
-        if (!scene && candidate.activationState == UISceneActivationStateForegroundInactive) {
-            scene = (UIWindowScene *)candidate;
-        }
+        if (hostWindow) break;
     }
 
-    if (scene) {
-        LingWindow *win = [[LingWindow alloc] initWithWindowScene:scene];
-        win.frame = scene.coordinateSpace.bounds;
-        win.windowLevel = UIWindowLevelAlert + 1;
-        win.backgroundColor = UIColor.clearColor;
-        win.opaque = NO;
-        win.rootViewController = [UIViewController new];
-        win.rootViewController.view.backgroundColor = UIColor.clearColor;
-        win.rootViewController.view.userInteractionEnabled = YES;
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+    if (!hostWindow) hostWindow = app.keyWindow;
+#pragma clang diagnostic pop
 
-        // Retain the UIWindow explicitly. A local UIWindow can disappear after
-        // setup returns, taking the overlay with it.
-        g_overlayWindow = win;
-        CGFloat top = win.safeAreaInsets.top > 0 ? win.safeAreaInsets.top : 44;
-        CGFloat left = win.safeAreaInsets.left > 0 ? win.safeAreaInsets.left : 12;
-        UIView *host = win.rootViewController.view;
+    if (!hostWindow) {
+        NSLog(@"[Ling] overlay waiting: no visible game window");
+        return;
+    }
+
+    // If UIKit replaced the game window during a scene transition, remove
+    // stale controls before attaching to the currently active window.
+    if (g_menu && g_menu.superview != hostWindow) {
+        [g_menu removeFromSuperview];
+        [g_goMenu removeFromSuperview];
+        g_menu = nil;
+        g_goMenu = nil;
+    }
+
+    UIView *host = hostWindow;
+    CGFloat top = host.safeAreaInsets.top > 0 ? host.safeAreaInsets.top : 12;
+    CGFloat left = host.safeAreaInsets.left > 0 ? host.safeAreaInsets.left : 12;
+
+    if (!g_menu) {
         LingFloatingButton *menu = [[LingFloatingButton alloc] initWithGoButton:NO];
         LingFloatingButton *go = [[LingFloatingButton alloc] initWithGoButton:YES];
-        menu.center = CGPointMake(left + 28, top + 48);
-        go.center = CGPointMake(left + 28, top + 104);
+
+        // Position using the host window's own bounds and coordinate system.
+        menu.center = CGPointMake(left + 36, top + 48);
+        go.center = CGPointMake(left + 36, top + 104);
         [host addSubview:menu];
         [host addSubview:go];
         g_menu = menu;
         g_goMenu = go;
-        win.hidden = NO;
-        [win setNeedsLayout];
-        [win layoutIfNeeded];
-        NSLog(@"[Ling] overlay attached to foreground UIWindowScene");
-        return;
+    } else {
+        [host bringSubviewToFront:g_menu];
+        [host bringSubviewToFront:g_goMenu];
     }
 
-    // Scene may not be ready immediately after injection. Attach to the
-    // current app window when available, and let the retry timer try again.
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
-    UIWindow *keyWindow = app.keyWindow;
-#pragma clang diagnostic pop
-    if (!keyWindow) {
-        for (UIScene *candidate in app.connectedScenes) {
-            if (![candidate isKindOfClass:[UIWindowScene class]]) continue;
-            for (UIWindow *candidateWindow in ((UIWindowScene *)candidate).windows) {
-                if (!candidateWindow.hidden) { keyWindow = candidateWindow; break; }
-            }
-            if (keyWindow) break;
-        }
-    }
-    if (!keyWindow) {
-        NSLog(@"[Ling] overlay waiting: no active app window yet");
-        return;
-    }
-
-    CGFloat top = keyWindow.safeAreaInsets.top > 0 ? keyWindow.safeAreaInsets.top : 44;
-    CGFloat left = keyWindow.safeAreaInsets.left > 0 ? keyWindow.safeAreaInsets.left : 12;
-    LingFloatingButton *menu = [[LingFloatingButton alloc] initWithGoButton:NO];
-    LingFloatingButton *go = [[LingFloatingButton alloc] initWithGoButton:YES];
-    menu.center = CGPointMake(left + 28, top + 48);
-    go.center = CGPointMake(left + 28, top + 104);
-    [keyWindow addSubview:menu];
-    [keyWindow addSubview:go];
-    [keyWindow bringSubviewToFront:menu];
-    [keyWindow bringSubviewToFront:go];
-    g_overlayWindow = keyWindow;
-    g_menu = menu;
-    g_goMenu = go;
-    NSLog(@"[Ling] overlay attached to existing app window");
+    g_overlayWindow = hostWindow;
+    NSLog(@"[Ling] overlay attached directly to game UIWindow");
 }
 
 // ─────────────────────────────────────────────────────────
