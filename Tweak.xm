@@ -151,8 +151,14 @@ static int            g_tries   = 0;
 
 static BOOL resolve(void) {
     if (g_ready) return YES;
-    if (++g_tries > 120) return NO;
-    if (!il2cpp_attach()) return NO;
+    // Unity/IL2CPP may initialize well after the overlay appears. Do not
+    // permanently disable resolution after an arbitrary number of retries.
+    g_tries++;
+    if (!il2cpp_attach()) {
+        if (g_tries == 1 || g_tries % 40 == 0)
+            NSLog(@"[Ling] waiting for GameAssembly/IL2CPP (attempt %d)", g_tries);
+        return NO;
+    }
 
     size_t sz = 0;
     void **asms = f_domain_get_assemblies(f_domain_get(), &sz);
@@ -163,7 +169,9 @@ static BOOL resolve(void) {
     g_lp_off  = get_field_off("Assembly-CSharp.dll", "", "BattleManager", "m_LocalPlayerShow");
 
     if (!g_skill2 || g_lp_off == (size_t)-1) {
-        NSLog(@"[Ling] partial: skill2=%p lp_off=%zu", (void*)g_skill2, g_lp_off);
+        if (g_tries == 1 || g_tries % 40 == 0)
+            NSLog(@"[Ling] resolve pending: skill2=%p lp_off=%zu attempt=%d",
+                  (void*)g_skill2, g_lp_off, g_tries);
         return NO;
     }
     g_ready = YES;
@@ -237,8 +245,13 @@ static void tick(void) {
             if (g_swords <= 0) { g_state = sCooldown; g_next = now + 1.0; break; }
             if (now >= g_next) {
                 void *p = get_player();
-                if (p) fire_skill2(p, 4 - g_swords);
-                else NSLog(@"[Ling] no player");
+                if (!p) {
+                    NSLog(@"[Ling] collect waiting: local player is null");
+                    g_next = now + 0.20;
+                    break;
+                }
+                NSLog(@"[Ling] collect attempt %d/4", 5 - g_swords);
+                fire_skill2(p, 4 - g_swords);
                 g_swords--;
                 g_next = now + 0.38;
             }
@@ -318,7 +331,16 @@ static LingFloatingButton *g_goMenu = nil;
 }
 
 - (void)goTap {
-    if (g_enabled && g_state == sIdle) g_trigger = YES;
+    if (!g_enabled) {
+        NSLog(@"[Ling] GO ignored: feature disabled");
+        return;
+    }
+    if (g_state != sIdle) {
+        NSLog(@"[Ling] GO ignored: state=%d", (int)g_state);
+        return;
+    }
+    g_trigger = YES;
+    NSLog(@"[Ling] GO trigger queued");
 }
 
 - (void)refresh {
