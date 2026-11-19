@@ -372,8 +372,11 @@ static void setup_overlay(void) {
         [win addSubview:menu];
         g_menu = menu;
     } else {
-        // Fallback: attach to existing keyWindow
+        // Fallback: attach to existing key window (suppress deprecation — no scene available)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
         UIWindow *kw = UIApplication.sharedApplication.keyWindow;
+#pragma clang diagnostic pop
         if (!kw) return;
         CGFloat top  = kw.safeAreaInsets.top  > 0 ? kw.safeAreaInsets.top  : 44;
         CGFloat left = kw.safeAreaInsets.left > 0 ? kw.safeAreaInsets.left : 12;
