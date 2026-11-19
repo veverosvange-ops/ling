@@ -257,101 +257,89 @@ static void tick(void) {
 // Overlay UI
 // ─────────────────────────────────────────────────────────
 
-@class LingMenu;
-static LingMenu *g_menu = nil;
+@class LingFloatingButton;
+static LingFloatingButton *g_menu = nil;
+static LingFloatingButton *g_goMenu = nil;
 
-@interface LingMenu : UIView
+@interface LingFloatingButton : UIView
 @property CGPoint drag;
+@property BOOL goButton;
+- (instancetype)initWithGoButton:(BOOL)isGo;
 - (void)refresh;
 @end
 
-@implementation LingMenu
+@implementation LingFloatingButton
 
-- (instancetype)init {
-    self = [super initWithFrame:CGRectMake(0, 0, 64, 96)];
-    self.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.85];
-    self.layer.cornerRadius = 10;
+- (instancetype)initWithGoButton:(BOOL)isGo {
+    self = [super initWithFrame:CGRectMake(0, 0, 56, 44)];
+    if (!self) return nil;
+    _goButton = isGo;
+    self.backgroundColor = [UIColor colorWithWhite:0.08 alpha:0.88];
+    self.layer.cornerRadius = 11;
     self.layer.borderWidth = 1;
     self.clipsToBounds = YES;
-    [self makeButtons];
-    return self;
-}
 
-- (void)makeButtons {
-    UIButton *tog = [UIButton buttonWithType:UIButtonTypeCustom];
-    tog.frame = CGRectMake(0,0,64,44);
-    tog.titleLabel.font = [UIFont boldSystemFontOfSize:16];
-    [tog setTitle:@"L" forState:UIControlStateNormal];
-    [tog setTitleColor:[UIColor colorWithRed:.2 green:1 blue:.2 alpha:1] forState:UIControlStateNormal];
-    [tog addTarget:self action:@selector(toggle) forControlEvents:UIControlEventTouchUpInside];
-    [self addSubview:tog];
-
-    UIButton *go = [UIButton buttonWithType:UIButtonTypeCustom];
-    go.frame = CGRectMake(0,44,64,44);
-    go.titleLabel.font = [UIFont boldSystemFontOfSize:14];
-    [go setTitle:@"GO" forState:UIControlStateNormal];
-    [go setTitleColor:[UIColor yellowColor] forState:UIControlStateNormal];
-    [go addTarget:self action:@selector(goTap) forControlEvents:UIControlEventTouchUpInside];
-    [self addSubview:go];
+    UIButton *button = [UIButton buttonWithType:UIButtonTypeCustom];
+    button.frame = self.bounds;
+    button.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+    button.titleLabel.font = [UIFont boldSystemFontOfSize:isGo ? 13 : 16];
+    [button setTitle:(isGo ? @"GO" : @"L") forState:UIControlStateNormal];
+    [button addTarget:self action:(isGo ? @selector(goTap) : @selector(toggle))
+     forControlEvents:UIControlEventTouchUpInside];
+    [self addSubview:button];
 
     UIPanGestureRecognizer *pan = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(pan:)];
     pan.cancelsTouchesInView = NO;
     pan.delaysTouchesBegan = NO;
     pan.maximumNumberOfTouches = 1;
     [self addGestureRecognizer:pan];
+    [self refresh];
+    return self;
 }
 
-- (void)toggle { g_enabled = !g_enabled; g_state = sIdle; [self refresh]; }
-- (void)goTap  { if (g_enabled && g_state == sIdle) g_trigger = YES; }
+- (void)toggle {
+    g_enabled = !g_enabled;
+    g_state = sIdle;
+    [g_menu refresh];
+}
+
+- (void)goTap {
+    if (g_enabled && g_state == sIdle) g_trigger = YES;
+}
 
 - (void)refresh {
-    UIView *tog = self.subviews.firstObject;
-    if ([tog isKindOfClass:[UIButton class]]) {
-        UIColor *c = g_enabled ? [UIColor colorWithRed:.2 green:1 blue:.2 alpha:1]
-                               : [UIColor grayColor];
-        [(UIButton *)tog setTitleColor:c forState:UIControlStateNormal];
-    }
-    self.layer.borderColor = g_enabled
+    UIColor *titleColor = _goButton
+        ? [UIColor yellowColor]
+        : (g_enabled ? [UIColor colorWithRed:.2 green:1 blue:.2 alpha:1] : [UIColor grayColor]);
+    UIButton *button = (UIButton *)self.subviews.firstObject;
+    [button setTitleColor:titleColor forState:UIControlStateNormal];
+    self.layer.borderColor = (!_goButton && g_enabled)
         ? [UIColor colorWithRed:.2 green:.9 blue:.2 alpha:.8].CGColor
-        : [UIColor colorWithWhite:.4 alpha:.6].CGColor;
+        : [UIColor colorWithWhite:.4 alpha:.65].CGColor;
 }
 
 - (void)pan:(UIPanGestureRecognizer *)g {
     UIView *parent = self.superview;
     if (!parent) return;
-
     if (g.state == UIGestureRecognizerStateBegan) {
         _drag = self.center;
         return;
     }
-
     if (g.state == UIGestureRecognizerStateChanged) {
-        // Both center and translation are expressed in the parent view's
-        // coordinate space. Clamp the menu so it cannot jump off-screen.
         CGPoint translation = [g translationInView:parent];
         CGFloat halfW = CGRectGetWidth(self.bounds) * 0.5;
         CGFloat halfH = CGRectGetHeight(self.bounds) * 0.5;
-        CGFloat minX = halfW;
         CGFloat maxX = CGRectGetWidth(parent.bounds) - halfW;
-        CGFloat minY = halfH;
         CGFloat maxY = CGRectGetHeight(parent.bounds) - halfH;
-
-        CGFloat x = _drag.x + translation.x;
-        CGFloat y = _drag.y + translation.y;
-        if (maxX < minX) x = CGRectGetMidX(parent.bounds);
-        else x = MIN(MAX(x, minX), maxX);
-        if (maxY < minY) y = CGRectGetMidY(parent.bounds);
-        else y = MIN(MAX(y, minY), maxY);
-
+        CGFloat x = MIN(MAX(_drag.x + translation.x, halfW), MAX(halfW, maxX));
+        CGFloat y = MIN(MAX(_drag.y + translation.y, halfH), MAX(halfH, maxY));
         self.center = CGPointMake(x, y);
     } else if (g.state == UIGestureRecognizerStateEnded ||
                g.state == UIGestureRecognizerStateCancelled ||
                g.state == UIGestureRecognizerStateFailed) {
         _drag = self.center;
-        [g setTranslation:CGPointZero inView:parent];
     }
 }
-
 @end
 
 @interface LingWindow : UIWindow @end
@@ -361,8 +349,9 @@ static LingMenu *g_menu = nil;
 
     // Full-screen transparent window: only the floating menu consumes touches.
     // All touches outside the menu pass through to the game underneath.
-    if (!g_menu || !v) return nil;
-    if (v == g_menu || [v isDescendantOfView:g_menu]) return v;
+    if (!v) return nil;
+    if ((g_menu && (v == g_menu || [v isDescendantOfView:g_menu])) ||
+        (g_goMenu && (v == g_goMenu || [v isDescendantOfView:g_goMenu]))) return v;
     return nil;
 }
 @end
@@ -426,10 +415,15 @@ static void setup_overlay(void) {
         g_overlayWindow = win;
         CGFloat top = win.safeAreaInsets.top > 0 ? win.safeAreaInsets.top : 44;
         CGFloat left = win.safeAreaInsets.left > 0 ? win.safeAreaInsets.left : 12;
-        LingMenu *menu = [LingMenu new];
-        menu.center = CGPointMake(left + 32, top + 48);
-        [win.rootViewController.view addSubview:menu];
+        UIView *host = win.rootViewController.view;
+        LingFloatingButton *menu = [[LingFloatingButton alloc] initWithGoButton:NO];
+        LingFloatingButton *go = [[LingFloatingButton alloc] initWithGoButton:YES];
+        menu.center = CGPointMake(left + 28, top + 48);
+        go.center = CGPointMake(left + 28, top + 104);
+        [host addSubview:menu];
+        [host addSubview:go];
         g_menu = menu;
+        g_goMenu = go;
         win.hidden = NO;
         [win setNeedsLayout];
         [win layoutIfNeeded];
@@ -459,12 +453,17 @@ static void setup_overlay(void) {
 
     CGFloat top = keyWindow.safeAreaInsets.top > 0 ? keyWindow.safeAreaInsets.top : 44;
     CGFloat left = keyWindow.safeAreaInsets.left > 0 ? keyWindow.safeAreaInsets.left : 12;
-    LingMenu *menu = [LingMenu new];
-    menu.center = CGPointMake(left + 32, top + 48);
+    LingFloatingButton *menu = [[LingFloatingButton alloc] initWithGoButton:NO];
+    LingFloatingButton *go = [[LingFloatingButton alloc] initWithGoButton:YES];
+    menu.center = CGPointMake(left + 28, top + 48);
+    go.center = CGPointMake(left + 28, top + 104);
     [keyWindow addSubview:menu];
+    [keyWindow addSubview:go];
     [keyWindow bringSubviewToFront:menu];
+    [keyWindow bringSubviewToFront:go];
     g_overlayWindow = keyWindow;
     g_menu = menu;
+    g_goMenu = go;
     NSLog(@"[Ling] overlay attached to existing app window");
 }
 
